@@ -12,35 +12,35 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout Código
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configurar Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Instalar Dependências
+      - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      # Exemplo rodando testes da sua stack (ajuste para dotnet test, pytest, npm test, etc.)
-      - name: Executar Testes do Projeto
+      # Example running test suite (adjust for pytest, npm test, cargo test, dotnet test, etc.)
+      - name: Run Project Tests
         run: |
           pytest > tests.log 2>&1 || true
 
-      - name: Extrair Diff do PR
+      - name: Extract PR Diff
         run: |
           git diff origin/${{ github.base_ref }}...HEAD > diff.txt
 
-      - name: Executar Gatekeeper
+      - name: Run Gatekeeper
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
           python gatekeeper.py
 
-      - name: Comentar no Pull Request
+      - name: Post PR Comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

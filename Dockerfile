@@ -1,24 +1,24 @@
 FROM python:3.11-slim
 
-# Evita criação de arquivos .pyc e ativa buffer de saída imediato
+# Prevent bytecode file generation and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
 WORKDIR /app
 
-# Instala ferramentas essenciais do sistema
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Instala dependências Python primeiro para aproveitar o cache de camadas
+# Install Python dependencies first for caching efficiency
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
-# Copia o código da aplicação
+# Copy application source code
 COPY . .
 
-# Comando padrão
+# Default execution command
 CMD ["python", "gatekeeper.py"]

@@ -1,14 +1,14 @@
-# Diretrizes de Arquitetura e Engenharia do Projeto
+# Architecture and Engineering Guidelines
 
-## 1. Segurança & Autenticação
-- Nunca permita credenciais, senhas, tokens ou connection strings em texto plano no código.
-- Todas as queries de banco devem usar parametrização (Prepared Statements ou ORM). Concatenação de strings em SQL é proibida (BLOCKER).
-- Endpoints que manipulam dados de usuários devem validar permissão/escopo no handler.
+## 1. Security & Authentication
+- Never allow hardcoded credentials, passwords, tokens, API keys, or plain-text database connection strings in code.
+- All database queries must use parameterized queries (Prepared Statements or ORM). String concatenation in SQL statements is strictly prohibited (BLOCKER).
+- Endpoints handling user data must enforce permission and scope validation in the request handler.
 
-## 2. Padrões de Projeto & Qualidade
-- Tratamento de exceções: Não engula exceções com `catch (Exception e) {}` ou `except Exception: pass` vazios.
-- Injeção de dependência deve ser feita via construtor/interfaces, evitando instanciar serviços diretamente com `new`.
-- Funções não devem ultrapassar 50 linhas de código (Code Smell).
+## 2. Design Patterns & Code Quality
+- Exception handling: Do not swallow exceptions with empty `catch (Exception e) {}` or `except Exception: pass` blocks.
+- Dependency injection must be performed via constructors or interfaces, avoiding direct service instantiation with `new`.
+- Functions and methods must not exceed 50 lines of code (Code Smell / Complexity Warning).
 
-## 3. Estratégia de Testes
-- Todo novo endpoint ou serviço de regra de negócio deve vir acompanhado de testes unitários ou de integração no mesmo PR.
+## 3. Testing Strategy
+- Every new endpoint, service, or business rule implementation must include corresponding unit or integration tests within the same Pull Request.

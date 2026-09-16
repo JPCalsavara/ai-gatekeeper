@@ -4,7 +4,7 @@ from langchain_core.messages import AIMessage
 
 @pytest.fixture
 def mock_flash_response():
-    """Gera um mock de resposta do Gemini 2.5 Flash."""
+    """Generates a mock response for Gemini 2.5 Flash."""
     def _create(content: str, in_tokens: int = 120, out_tokens: int = 60):
         mock_resp = AIMessage(content=content)
         mock_resp.response_metadata = {
@@ -18,7 +18,7 @@ def mock_flash_response():
 
 @pytest.fixture
 def mock_pro_response():
-    """Gera um mock de resposta do Gemini 2.5 Pro."""
+    """Generates a mock response for Gemini 2.5 Pro."""
     def _create(content: str, in_tokens: int = 350, out_tokens: int = 150):
         mock_resp = AIMessage(content=content)
         mock_resp.response_metadata = {

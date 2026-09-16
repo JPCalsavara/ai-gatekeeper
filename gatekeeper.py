@@ -11,23 +11,23 @@ from langgraph.graph import StateGraph, START, END
 
 load_dotenv()
 
-# Sincroniza chaves de API caso fornecido via GOOGLE_API_KEY ou GEMINI_API_KEY
+# Synchronize API keys between GOOGLE_API_KEY and GEMINI_API_KEY
 api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 if api_key and not os.getenv("GOOGLE_API_KEY"):
     os.environ["GOOGLE_API_KEY"] = api_key
 
-# Configuração de Modelos e Preços de Referência (por 1M tokens)
+# Reference Model Pricing (per 1M tokens)
 PRICING = {
     "flash": {"name": "gemini-2.5-flash", "in": 0.075, "out": 0.30},
     "pro": {"name": "gemini-2.5-pro", "in": 1.25, "out": 5.00}
 }
 
-# Inicialização com fallback de chave para permitir imports em testes e mocks
+# Initialization with key fallback to allow imports during test execution and mocking
 _init_key = api_key or "mock-key-for-init"
 flash_llm = ChatGoogleGenerativeAI(model=PRICING["flash"]["name"], temperature=0.1, google_api_key=_init_key)
 pro_llm = ChatGoogleGenerativeAI(model=PRICING["pro"]["name"], temperature=0.2, google_api_key=_init_key)
 
-# Definição do Estado Compartilhado
+# Shared State Definition
 class AgentMetric(TypedDict):
     model: str
     in_tokens: int
@@ -42,10 +42,10 @@ class ReviewState(TypedDict):
     test_analysis: str
     code_review: str
     final_verdict: str
-    # O operador.or_ combina dicionários de nós paralelos sem colisão no LangGraph
+    # operator.or_ merges dictionaries from parallel branches without state collisions in LangGraph
     telemetry: Annotated[Dict[str, AgentMetric], operator.or_]
 
-# Helper para Telemetria e Custo
+# Helper for Telemetry and Cost Calculation
 def run_agent(llm, tier: str, messages: list):
     start = time.time()
     response = llm.invoke(messages)
@@ -67,41 +67,41 @@ def run_agent(llm, tier: str, messages: list):
     }
     return response.content, metric
 
-# Nós Especialistas
+# Specialist Nodes
 def test_diagnostics_node(state: ReviewState):
-    """Analisa se houve falha nos testes unitários/integração."""
+    """Analyzes test logs for unit or integration failures against git diff."""
     logs = state.get("test_logs", "")
     if not logs or ("FAIL" not in logs and "ERROR" not in logs and "FAILED" not in logs):
-        return {"test_analysis": "✅ Todos os testes passaram sem erros."}
+        return {"test_analysis": "[PASSED] All tests passed with no errors."}
         
     prompt = [
-        SystemMessage(content="Você é especialista em testes. Analise o log de erro e o diff. Diga qual teste quebrou, a causa exata e a linha do diff responsável."),
-        HumanMessage(content=f"Logs de Teste:\n{logs}\n\nDiff do PR:\n{state.get('pr_diff', '')}")
+        SystemMessage(content="You are a test triage specialist. Analyze the test error logs and the PR diff. Identify which test broke, the root cause, and the exact responsible lines in the diff. Provide a fix patch suggestion."),
+        HumanMessage(content=f"Test Logs:\n{logs}\n\nPR Diff:\n{state.get('pr_diff', '')}")
     ]
     content, metric = run_agent(flash_llm, "flash", prompt)
     return {"test_analysis": content, "telemetry": {"tests": metric}}
 
 def code_review_node(state: ReviewState):
-    """Cruza o diff com as regras do docs/guidelines.md."""
+    """Reviews the PR diff strictly against guidelines.md (Context Harness)."""
     prompt = [
-        SystemMessage(content="Você é um Staff Engineer. Revise o diff estritamente contra as regras do repositório (Harness). Aponte violações com severidade: BLOCKER ou WARNING."),
-        HumanMessage(content=f"=== DIRETRIZES DO PROJETO ===\n{state.get('harness_rules', '')}\n\n=== DIFF ===\n{state.get('pr_diff', '')}")
+        SystemMessage(content="You are a Staff Engineer. Review the PR diff strictly against repository guidelines (Context Harness). Flag violations categorized as BLOCKER or WARNING with clear remediation guidance."),
+        HumanMessage(content=f"=== PROJECT GUIDELINES ===\n{state.get('harness_rules', '')}\n\n=== PR DIFF ===\n{state.get('pr_diff', '')}")
     ]
     content, metric = run_agent(flash_llm, "flash", prompt)
     return {"code_review": content, "telemetry": {"review": metric}}
 
 def supervisor_node(state: ReviewState):
-    """Consolida os achados e toma a decisão com Gemini Pro."""
+    """Consolidates findings and issues the final gatekeeper decision with Gemini Pro."""
     prompt = [
-        SystemMessage(content="Você é o Tech Lead responsável pelo Quality Gate. Emita o veredito final: APROVADO, APROVADO COM RESSALVAS ou REPROVADO. Se houver falha de teste ou violação BLOCKER, reprove."),
-        HumanMessage(content=f"--- Diagnóstico de Testes ---\n{state.get('test_analysis', '')}\n\n--- Revisão Técnica ---\n{state.get('code_review', '')}")
+        SystemMessage(content="You are the Tech Lead responsible for the Quality Gate. Provide the final verdict: APPROVED, APPROVED WITH WARNINGS, or REJECTED. If there is a test failure or any BLOCKER violation, you MUST mark it as REJECTED."),
+        HumanMessage(content=f"--- Test Diagnostics ---\n{state.get('test_analysis', '')}\n\n--- Technical Review ---\n{state.get('code_review', '')}")
     ]
     content, metric = run_agent(pro_llm, "pro", prompt)
     return {"final_verdict": content, "telemetry": {"supervisor": metric}}
 
-# Montagem do Grafo
+# Graph Construction
 def build_graph():
-    """Constrói e compila o grafo LangGraph do Quality Gatekeeper."""
+    """Builds and compiles the LangGraph state machine for the Quality Gatekeeper."""
     workflow = StateGraph(ReviewState)
     workflow.add_node("test_diagnostics", test_diagnostics_node)
     workflow.add_node("code_review", code_review_node)
@@ -118,7 +118,7 @@ def build_graph():
 app = build_graph()
 
 def generate_report(result: ReviewState) -> str:
-    """Gera o relatório formatado em Markdown com parecer e telemetria LLMOps."""
+    """Generates the Markdown report with decision and LLMOps telemetry."""
     telemetry = result.get("telemetry", {})
     total_tokens = sum(m["in_tokens"] + m["out_tokens"] for m in telemetry.values())
     total_cost = sum(m["cost_usd"] for m in telemetry.values())
@@ -129,23 +129,23 @@ def generate_report(result: ReviewState) -> str:
         for k, v in telemetry.items()
     ])
 
-    return f"""## 🛡️ AI Quality Gatekeeper Report
+    return f"""## AI Quality Gatekeeper Report
 
-### 📋 Veredito do Supervisor
-{result.get('final_verdict', 'Sem veredito.')}
+### Supervisor Verdict
+{result.get('final_verdict', 'No verdict provided.')}
 
-### 🧪 Status dos Testes
-{result.get('test_analysis', 'Não executado.')}
+### Test Execution Status
+{result.get('test_analysis', 'Not executed.')}
 
 <details>
-<summary><b>🔍 Detalhes da Revisão de Código</b></summary>
+<summary><b>Code Review Findings</b></summary>
 
-{result.get('code_review', 'Sem apontamentos.')}
+{result.get('code_review', 'No issues detected.')}
 </details>
 
 ---
-### 📊 Telemetria da Execução (LLMOps)
-| Agente | Modelo | Tokens | Tempo | Custo Est. |
+### Execution Telemetry (LLMOps)
+| Agent | Model | Tokens | Time | Est. Cost |
 | :--- | :--- | :--- | :--- | :--- |
 {rows}
 | **TOTAL** | — | **{total_tokens:,}** | **{total_time:.2f}s** | **`${total_cost:.5f} USD`** |
@@ -157,7 +157,7 @@ def main():
     rules = Path("docs/guidelines.md").read_text(encoding="utf-8") if Path("docs/guidelines.md").exists() else ""
 
     if not diff.strip():
-        print("Diff vazio. Encerrando.")
+        print("Diff is empty. Exiting.")
         sys.exit(0)
 
     initial_state = {
@@ -172,9 +172,10 @@ def main():
     Path("report.md").write_text(report, encoding="utf-8")
     print(report)
 
-    if "REPROVADO" in result.get("final_verdict", "").upper():
+    verdict = result.get("final_verdict", "").upper()
+    if "REJECTED" in verdict or "REPROVADO" in verdict:
         sys.exit(1)
 
-# Execução direta
+# Direct execution
 if __name__ == "__main__":
     main()
