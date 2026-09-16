@@ -1,0 +1,50 @@
+name: AI Quality Gatekeeper
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  gatekeeper:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar Dependências
+        run: pip install -r requirements.txt
+
+      # Exemplo rodando testes da sua stack (ajuste para dotnet test, pytest, npm test, etc.)
+      - name: Executar Testes do Projeto
+        run: |
+          pytest > tests.log 2>&1 || true
+
+      - name: Extrair Diff do PR
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > diff.txt
+
+      - name: Executar Gatekeeper
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          python gatekeeper.py
+
+      - name: Comentar no Pull Request
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f report.md ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file report.md
+          fi

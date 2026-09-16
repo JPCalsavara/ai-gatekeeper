@@ -1,0 +1,44 @@
+services:
+  gatekeeper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-gatekeeper
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    command: python gatekeeper.py
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-gatekeeper-test
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-mock-test-key}
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    command: pytest -v --tb=short
+
+  simulate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-gatekeeper-simulate
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    command: python simulate_gatekeeper.py --scenario violation

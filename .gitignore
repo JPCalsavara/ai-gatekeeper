@@ -1,0 +1,37 @@
+# Ambientes Virtuais e Dependências
+.venv/
+venv/
+ENV/
+env/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Arquivos de ambiente e segredos
+.env
+.env.local
+*.pem
+*.key
+
+# Arquivos de execução e relatórios gerados em runtime
+diff.txt
+tests.log
+report.md
+
+# Testes e Cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDEs e Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.docker/

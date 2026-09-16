@@ -1,0 +1,24 @@
+diff --git a/services/calculator.py b/services/calculator.py
+index e69de29..4b825dc 100644
+--- a/services/calculator.py
++++ b/services/calculator.py
+@@ -0,0 +1,12 @@
++"""Service for safe mathematical operations."""
++
++def calculate_ratio(dividend: float, divisor: float) -> float:
++    """Calculates ratio handling zero division safely."""
++    if divisor == 0:
++        return 0.0
++    return dividend / divisor
+diff --git a/tests/test_calculator.py b/tests/test_calculator.py
+index e69de29..8a7c1b2 100644
+--- a/tests/test_calculator.py
++++ b/tests/test_calculator.py
+@@ -0,0 +1,8 @@
++from services.calculator import calculate_ratio
++
++def test_calculate_ratio_normal():
++    assert calculate_ratio(10, 2) == 5.0
++
++def test_calculate_ratio_zero():
++    assert calculate_ratio(10, 0) == 0.0

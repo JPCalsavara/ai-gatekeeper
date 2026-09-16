@@ -1,0 +1,16 @@
+diff --git a/services/user_service.py b/services/user_service.py
+index a1b2c3d..e4f5g6h 100644
+--- a/services/user_service.py
++++ b/services/user_service.py
+@@ -10,6 +10,22 @@ class UserService:
++    DATABASE_URL = "postgres://admin:SuperSecretPassword123!@db.internal:5432/production"
++
++    def get_user_by_name(self, username: str):
++        # VIOLATION: SQL injection / concatenation
++        query = f"SELECT * FROM users WHERE username = '{username}'"
++        try:
++            return db.execute(query)
++        except Exception:
++            # VIOLATION: Empty exception swallowing
++            pass
++        return None
