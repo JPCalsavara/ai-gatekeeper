@@ -42,3 +42,19 @@ services:
     volumes:
       - .:/app
     command: python simulate_gatekeeper.py --scenario violation
+
+  harness:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-gatekeeper-harness
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    command: python build_harness.py --docs docs README.md --output context_harness.json

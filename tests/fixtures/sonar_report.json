@@ -1,0 +1,23 @@
+{
+  "total": 2,
+  "issues": [
+    {
+      "key": "AY123456",
+      "rule": "python:S2077",
+      "severity": "BLOCKER",
+      "component": "ai-gatekeeper:services/user_service.py",
+      "line": 14,
+      "message": "Formatting SQL queries is security-sensitive.",
+      "type": "VULNERABILITY"
+    },
+    {
+      "key": "AY123457",
+      "rule": "python:S112",
+      "severity": "MAJOR",
+      "component": "ai-gatekeeper:services/user_service.py",
+      "line": 17,
+      "message": "Do not raise or swallow generic exceptions.",
+      "type": "CODE_SMELL"
+    }
+  ]
+}

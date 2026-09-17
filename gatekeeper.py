@@ -9,6 +9,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 
+from sonar_adapter import get_sonar_report
+from context_harness import retrieve_relevant_guidelines
+
 load_dotenv()
 
 # Synchronize API keys between GOOGLE_API_KEY and GEMINI_API_KEY
@@ -39,8 +42,10 @@ class ReviewState(TypedDict):
     pr_diff: str
     harness_rules: str
     test_logs: str
+    sonar_issues: str
     test_analysis: str
     code_review: str
+    sonar_analysis: str
     final_verdict: str
     # operator.or_ merges dictionaries from parallel branches without state collisions in LangGraph
     telemetry: Annotated[Dict[str, AgentMetric], operator.or_]
@@ -82,19 +87,41 @@ def test_diagnostics_node(state: ReviewState):
     return {"test_analysis": content, "telemetry": {"tests": metric}}
 
 def code_review_node(state: ReviewState):
-    """Reviews the PR diff strictly against guidelines.md (Context Harness)."""
+    """Reviews the PR diff strictly against guidelines (Context Harness)."""
+    rules = state.get("harness_rules", "")
+    diff = state.get("pr_diff", "")
+
+    # If context_harness.json exists, semantically retrieve the most relevant guidelines
+    if Path("context_harness.json").exists():
+        semantic_rules = retrieve_relevant_guidelines(diff, Path("context_harness.json"), top_k=4)
+        if semantic_rules.strip():
+            rules = semantic_rules
+
     prompt = [
         SystemMessage(content="You are a Staff Engineer. Review the PR diff strictly against repository guidelines (Context Harness). Flag violations categorized as BLOCKER or WARNING with clear remediation guidance."),
-        HumanMessage(content=f"=== PROJECT GUIDELINES ===\n{state.get('harness_rules', '')}\n\n=== PR DIFF ===\n{state.get('pr_diff', '')}")
+        HumanMessage(content=f"=== PROJECT GUIDELINES ===\n{rules}\n\n=== PR DIFF ===\n{diff}")
     ]
     content, metric = run_agent(flash_llm, "flash", prompt)
     return {"code_review": content, "telemetry": {"review": metric}}
 
+def sonar_triage_node(state: ReviewState):
+    """Triages SonarQube static analysis issues and correlates them with the diff."""
+    issues = state.get("sonar_issues", "")
+    if not issues:
+        return {"sonar_analysis": "[PASSED] No SonarQube issues detected."}
+
+    prompt = [
+        SystemMessage(content="You are a static analysis remediation engineer. Review the reported SonarQube issues and cross-reference them with the PR diff. Highlight blocker vulnerabilities or critical code smells and provide exact code patch remediation."),
+        HumanMessage(content=f"SonarQube Issues:\n{issues}\n\nPR Diff:\n{state.get('pr_diff', '')}")
+    ]
+    content, metric = run_agent(flash_llm, "flash", prompt)
+    return {"sonar_analysis": content, "telemetry": {"sonar": metric}}
+
 def supervisor_node(state: ReviewState):
     """Consolidates findings and issues the final gatekeeper decision with Gemini Pro."""
     prompt = [
-        SystemMessage(content="You are the Tech Lead responsible for the Quality Gate. Provide the final verdict: APPROVED, APPROVED WITH WARNINGS, or REJECTED. If there is a test failure or any BLOCKER violation, you MUST mark it as REJECTED."),
-        HumanMessage(content=f"--- Test Diagnostics ---\n{state.get('test_analysis', '')}\n\n--- Technical Review ---\n{state.get('code_review', '')}")
+        SystemMessage(content="You are the Tech Lead responsible for the Quality Gate. Provide the final verdict: APPROVED, APPROVED WITH WARNINGS, or REJECTED. If there is a test failure, SonarQube BLOCKER, or guideline BLOCKER violation, you MUST mark it as REJECTED."),
+        HumanMessage(content=f"--- Test Diagnostics ---\n{state.get('test_analysis', '')}\n\n--- Technical Review ---\n{state.get('code_review', '')}\n\n--- SonarQube Analysis ---\n{state.get('sonar_analysis', '')}")
     ]
     content, metric = run_agent(pro_llm, "pro", prompt)
     return {"final_verdict": content, "telemetry": {"supervisor": metric}}
@@ -105,12 +132,17 @@ def build_graph():
     workflow = StateGraph(ReviewState)
     workflow.add_node("test_diagnostics", test_diagnostics_node)
     workflow.add_node("code_review", code_review_node)
+    workflow.add_node("sonar_triage", sonar_triage_node)
     workflow.add_node("supervisor", supervisor_node)
 
     workflow.add_edge(START, "test_diagnostics")
     workflow.add_edge(START, "code_review")
+    workflow.add_edge(START, "sonar_triage")
+
     workflow.add_edge("test_diagnostics", "supervisor")
     workflow.add_edge("code_review", "supervisor")
+    workflow.add_edge("sonar_triage", "supervisor")
+
     workflow.add_edge("supervisor", END)
 
     return workflow.compile()
@@ -129,6 +161,14 @@ def generate_report(result: ReviewState) -> str:
         for k, v in telemetry.items()
     ])
 
+    sonar_section = ""
+    sonar_analysis = result.get("sonar_analysis", "")
+    if sonar_analysis and "[PASSED]" not in sonar_analysis:
+        sonar_section = f"""
+### SonarQube Triage Findings
+{sonar_analysis}
+"""
+
     return f"""## AI Quality Gatekeeper Report
 
 ### Supervisor Verdict
@@ -136,7 +176,7 @@ def generate_report(result: ReviewState) -> str:
 
 ### Test Execution Status
 {result.get('test_analysis', 'Not executed.')}
-
+{sonar_section}
 <details>
 <summary><b>Code Review Findings</b></summary>
 
@@ -155,6 +195,7 @@ def main():
     diff = Path("diff.txt").read_text(encoding="utf-8") if Path("diff.txt").exists() else ""
     tests = Path("tests.log").read_text(encoding="utf-8") if Path("tests.log").exists() else ""
     rules = Path("docs/guidelines.md").read_text(encoding="utf-8") if Path("docs/guidelines.md").exists() else ""
+    sonar_report = get_sonar_report(Path("."))
 
     if not diff.strip():
         print("Diff is empty. Exiting.")
@@ -164,6 +205,7 @@ def main():
         "pr_diff": diff,
         "harness_rules": rules,
         "test_logs": tests,
+        "sonar_issues": sonar_report,
         "telemetry": {}
     }
 

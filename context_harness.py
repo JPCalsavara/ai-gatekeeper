@@ -1,0 +1,146 @@
+"""
+Context Harness indexing and semantic retrieval engine.
+Extracts engineering rules, RFCs, and guidelines from the environment,
+generates embeddings using Google text-embedding-004, and saves a local JSON index.
+Provides cosine similarity retrieval to inject relevant guidelines during PR reviews.
+"""
+
+import os
+import json
+import re
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Calculates cosine similarity between two float vectors in pure Python."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+def chunk_markdown(file_path: Path) -> List[Dict[str, str]]:
+    """Splits a markdown file into logical chunks by section headings."""
+    content = file_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    chunks = []
+    current_title = file_path.name
+    current_lines = []
+
+    for line in lines:
+        if line.startswith("#"):
+            if current_lines:
+                chunk_text = "\n".join(current_lines).strip()
+                if chunk_text:
+                    chunks.append({
+                        "source": str(file_path),
+                        "title": current_title,
+                        "content": chunk_text
+                    })
+                current_lines = []
+            current_title = line.lstrip("#").strip()
+        current_lines.append(line)
+
+    if current_lines:
+        chunk_text = "\n".join(current_lines).strip()
+        if chunk_text:
+            chunks.append({
+                "source": str(file_path),
+                "title": current_title,
+                "content": chunk_text
+            })
+
+    return chunks
+
+def build_harness_index(sources: List[Path], output_file: Path = Path("context_harness.json")) -> int:
+    """Scans document sources, computes embeddings, and writes the local JSON vector store."""
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("Missing GOOGLE_API_KEY or GEMINI_API_KEY for embedding generation.")
+
+    embeddings_model = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        google_api_key=api_key
+    )
+
+    all_chunks = []
+    for src in sources:
+        if src.is_file():
+            all_chunks.extend(chunk_markdown(src))
+        elif src.is_dir():
+            for p in src.glob("**/*.md"):
+                all_chunks.extend(chunk_markdown(p))
+
+    if not all_chunks:
+        print("[WARN] No markdown chunks found to index.")
+        return 0
+
+    texts = [f"{c['title']}\n{c['content']}" for c in all_chunks]
+    vectors = embeddings_model.embed_documents(texts)
+
+    index_data = []
+    for idx, (chunk, vector) in enumerate(zip(all_chunks, vectors)):
+        index_data.append({
+            "id": f"chunk_{idx}",
+            "source": chunk["source"],
+            "title": chunk["title"],
+            "content": chunk["content"],
+            "embedding": vector
+        })
+
+    output_file.write_text(json.dumps(index_data, indent=2), encoding="utf-8")
+    print(f"[SUCCESS] Indexed {len(index_data)} chunks into {output_file}")
+    return len(index_data)
+
+def retrieve_relevant_guidelines(query: str, index_file: Path = Path("context_harness.json"), top_k: int = 3) -> str:
+    """
+    Retrieves the top_k most semantically relevant guidelines from context_harness.json.
+    Falls back to docs/guidelines.md if index file is not present.
+    """
+    if not index_file.exists():
+        fallback_file = Path("docs/guidelines.md")
+        if fallback_file.exists():
+            return fallback_file.read_text(encoding="utf-8")
+        return ""
+
+    try:
+        data = json.loads(index_file.read_text(encoding="utf-8"))
+        if not data:
+            return ""
+
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            # Fallback to static text if no API key is available for query embedding
+            fallback_file = Path("docs/guidelines.md")
+            return fallback_file.read_text(encoding="utf-8") if fallback_file.exists() else ""
+
+        embeddings_model = GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=api_key
+        )
+        query_vector = embeddings_model.embed_query(query[:1000])  # Cap query length
+
+        scored_chunks: List[Tuple[float, Dict]] = []
+        for item in data:
+            sim = cosine_similarity(query_vector, item.get("embedding", []))
+            scored_chunks.append((sim, item))
+
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
+
+        results = []
+        for score, item in scored_chunks[:top_k]:
+            results.append(f"### {item['title']} (Source: {item['source']}, Relevance: {score:.2f})\n{item['content']}")
+
+        return "\n\n".join(results)
+    except Exception as e:
+        print(f"[WARN] Error in semantic retrieval: {e}. Using fallback.")
+        fallback_file = Path("docs/guidelines.md")
+        return fallback_file.read_text(encoding="utf-8") if fallback_file.exists() else ""

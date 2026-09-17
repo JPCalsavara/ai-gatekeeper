@@ -1,56 +1,110 @@
 # AI Quality Gatekeeper
 
-> Autonomous PR Quality Gatekeeper built with **LangGraph** and **Dynamic Model Tiering** (Gemini 2.5 Flash + Pro). Automated test failure triage, architecture guideline enforcement (Context Harness), and open LLMOps cost telemetry directly in your CI/CD.
+> Autonomous PR Quality Gatekeeper built with **LangGraph** and **Dynamic Model Tiering** (Gemini 2.5 Flash + Pro). Automated test failure triage, architecture guideline enforcement (Context Harness with local JSON embeddings), SonarQube/SonarCloud static analysis triage, and open LLMOps cost telemetry directly in your CI/CD.
 
 ---
 
 ## Overview and Architecture
 
-AI Quality Gatekeeper integrates into continuous integration pipelines to resolve two major friction points in modern engineering teams:
+AI Quality Gatekeeper integrates into continuous integration pipelines to resolve three major friction points in modern engineering teams:
 1. **CI Log Fatigue:** Eliminates time spent manually parsing hundreds of lines of raw test logs by correlating the test failure traceback directly with the modified lines in the pull request diff.
-2. **Architectural Drift:** Automatically reviews diffs against the repository's internal engineering guidelines (`docs/guidelines.md`), flagging `BLOCKER` or `WARNING` violations before human code review begins.
+2. **Architectural Drift:** Automatically reviews diffs against the repository's internal engineering guidelines, using semantic search over local vector embeddings (`context_harness.json`).
+3. **Deterministic Static Analysis Triage:** Ingests SonarQube / SonarCloud reports (SARIF, JSON, or direct Web API), explains complex vulnerabilities, and generates immediate code patches.
 
 ### Execution Pipeline (LangGraph)
 
 ```mermaid
 flowchart TD
-    subgraph Inputs["1. Inputs (CI Runner)"]
+    subgraph Inputs["1. Inputs (CI Runner & Environment)"]
         direction TB
         E1["diff.txt (PR Git Diff)"]
         E2["tests.log (Test runner stdout/stderr)"]
-        E3["docs/guidelines.md (Repository Guidelines)"]
+        E3["context_harness.json / docs/guidelines.md (Local Vector Index)"]
+        E4["sonar-report.json / SARIF / Sonar API (Static Analysis)"]
     end
 
-    subgraph LangGraph["2. LangGraph Orchestration"]
+    subgraph LangGraph["2. LangGraph Orchestration (Parallel Execution)"]
         direction TB
         N1["Node 1: Gemini 2.5 Flash\nTest Failure Triage\n(Correlates logs with diff)"]
-        N2["Node 2: Gemini 2.5 Flash\nCode Review (Harness)\n(Checks diff against guidelines)"]
-        N3["Node 3: Gemini 2.5 Pro\nSupervisor & Tech Lead\n(Final verdict + remediation patch)"]
+        N2["Node 2: Gemini 2.5 Flash\nCode Review (Harness)\n(Semantic match against guidelines)"]
+        N3["Node 3: Gemini 2.5 Flash\nSonarQube Remediation\n(Correlates Sonar issues with diff)"]
+        N4["Node 4: Gemini 2.5 Pro\nSupervisor & Tech Lead\n(Final verdict + patch synthesis)"]
 
-        N1 --> N3
-        N2 --> N3
+        N1 --> N4
+        N2 --> N4
+        N3 --> N4
     end
 
     subgraph Output["3. Output (GitHub PR Comment)"]
         direction TB
         O1["PR Comment with Tech Lead Verdict"]
         O2["Remediation Patch Code Snippet"]
-        O3["LLMOps Cost & Telemetry Table"]
+        O3["SonarQube Triage Section"]
+        O4["LLMOps Cost & Telemetry Table"]
     end
 
     E1 --> N1
     E2 --> N1
     E1 --> N2
     E3 --> N2
-    N3 --> Output
+    E1 --> N3
+    E4 --> N3
+    N4 --> Output
 ```
+
+---
+
+## Context Harness: Local JSON Embeddings
+
+The **Context Harness** transitions the agent from generic coding advice to adhering strictly to your team's specific architecture standards, RFCs, and ADRs.
+
+### Generating the Local Embeddings Index (`context_harness.json`)
+You can scan your documentation and generate a local vector embedding index without external vector databases:
+
+```bash
+# Using Python locally
+python build_harness.py --docs docs README.md --output context_harness.json
+
+# Using Docker
+docker compose run --rm harness
+```
+
+### How Semantic Retrieval Works
+1. `build_harness.py` chunks markdown headings (`## `), computes vector embeddings via Google's `text-embedding-004`, and writes `context_harness.json`.
+2. During PR reviews, `gatekeeper.py` computes the embedding of the pull request diff and performs a pure Python cosine similarity search across all stored chunks.
+3. Only the top most relevant guidelines (e.g., SQL security, error handling, function size) are injected into the LLM context, keeping token usage low and preventing hallucinations.
+4. If `context_harness.json` is not present, the system automatically falls back to reading `docs/guidelines.md` directly.
+
+### Antigravity Skill
+An Antigravity skill is included in [`.agents/skills/context-harness/SKILL.md`](file:///.agents/skills/context-harness/SKILL.md). In the Antigravity IDE or CLI, the agent can be prompted to rebuild the harness whenever new RFCs or ADRs are merged.
+
+---
+
+## SonarQube & SonarCloud Integration
+
+The Gatekeeper natively supports SonarQube through three channels:
+
+### 1. File-Based Ingestion (Recommended for CI/CD)
+When your CI pipeline runs SonarScanner, configure it to output a report into the workspace:
+- **JSON Report:** Place `sonar-report.json` in the workspace root.
+- **SARIF Report:** Place `sonar-report.sarif` in the workspace root (standard GitHub Code Scanning format).
+
+### 2. Direct Web API Query
+If running in an environment with network access to your SonarQube server, set the following environment variables:
+- `SONAR_HOST_URL`: Base URL (e.g., `https://sonarcloud.io` or `http://sonar.internal:9000`).
+- `SONAR_TOKEN`: User or project analysis token.
+- `SONAR_PROJECT_KEY`: Sonar project identifier.
+- `PR_NUMBER`: (Optional) Restricts queries to issues introduced in the active pull request.
+
+`sonar_adapter.py` will query `/api/issues/search`, parse unresolved issues, and feed them into the `sonar_triage` node.
 
 ---
 
 ## Lean LLMOps & Cost Efficiency
 
-- **Zero Cost on Passing Tests:** If the test output does not contain failure keywords (`FAIL`, `ERROR`, `FAILED`), the diagnostics node skips LLM invocation entirely, saving both tokens and latency.
-- **Dynamic Model Tiering:** High-volume, fast triage runs on `gemini-2.5-flash` ($0.075 / $0.30 per 1M tokens), reserving `gemini-2.5-pro` strictly for final synthesis and decision-making by the supervisor node.
+- **Zero Cost on Passing Tests:** If the test output does not contain failure keywords (`FAIL`, `ERROR`, `FAILED`), the diagnostics node skips LLM invocation entirely.
+- **Zero Cost when Sonar is Clean:** If SonarQube reports zero issues, the Sonar node skips LLM calls.
+- **Dynamic Model Tiering:** High-volume triage runs on `gemini-2.5-flash` ($0.075 / $0.30 per 1M tokens), reserving `gemini-2.5-pro` strictly for final synthesis and decision-making by the supervisor node.
 - **Open Cost Accounting:** Every run posts an itemized table in the PR comment showing prompt tokens, completion tokens, execution seconds, and calculated USD cost (typically below `$0.003 USD` per PR).
 
 ---
@@ -59,6 +113,10 @@ flowchart TD
 
 ```text
 ai-gatekeeper/
+├── .agents/
+│   └── skills/
+│       └── context-harness/
+│           └── SKILL.md         # Antigravity Agent Skill for indexing guidelines
 ├── .github/
 │   └── workflows/
 │       └── gatekeeper.yml       # Official CI/CD workflow
@@ -66,20 +124,24 @@ ai-gatekeeper/
 │   ├── guidelines.md            # Repository standards (Context Harness)
 │   ├── folder_structure.md      # Detailed folder layout documentation
 │   ├── Lean_Canvas_and_MVP_Strategy.md # Lean canvas and MVP roadmap
-│   └── Lean Canvas & Estrategia de MVP.pdf # Original MVP canvas document
+│   └── Lean Canvas & Estratégia de MVP.pdf # Original MVP canvas document
 ├── tests/
-│   ├── fixtures/                # Sample diffs and test logs for local simulation
+│   ├── fixtures/                # Sample diffs, logs, and SonarQube reports
 │   ├── conftest.py              # Pytest fixtures and mock objects
 │   └── test_gatekeeper.py       # Automated unit and integration test suite
 ├── .env.example                 # Environment variables template
 ├── .gitignore                   # Git ignore patterns
+├── build_harness.py             # CLI to scan docs and generate local vector index
+├── context_harness.py           # Semantic retrieval engine with pure Python cosine similarity
 ├── docker-compose.yml           # Docker services orchestration
 ├── Dockerfile                   # Python 3.11 slim container definition
 ├── gatekeeper.py                # Core LangGraph execution engine
 ├── pytest.ini                   # Pytest configuration
+├── README.md                    # Project documentation & CI/CD setup guide
 ├── requirements.txt             # Core production dependencies
 ├── requirements-dev.txt         # Testing and development dependencies
-└── simulate_gatekeeper.py       # Local PR scenario simulator
+├── simulate_gatekeeper.py       # Local PR scenario simulator with Sonar support
+└── sonar_adapter.py             # SonarQube/SonarCloud SARIF, JSON, and Web API adapter
 ```
 
 ---
@@ -98,10 +160,15 @@ cp .env.example .env
 docker compose run --rm test
 ```
 
-### 3. Run Local Simulation
-Prepare sample input files (`diff.txt` and `tests.log`) from fixtures:
+### 3. Generate the Context Harness Vector Index
 ```bash
-# Simulates a scenario with failing tests and architectural violations
+docker compose run --rm harness
+```
+
+### 4. Run Local Simulation
+Prepare sample input files (`diff.txt`, `tests.log`, and `sonar-report.json`):
+```bash
+# Simulates a scenario with failing tests, Sonar blockers, and guideline violations
 docker compose run --rm simulate
 ```
 
@@ -112,39 +179,18 @@ docker compose run --rm gatekeeper
 
 ---
 
-## Running Locally Without Docker
-
-For environments with Python 3.10+:
-
-```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements-dev.txt
-
-# Run tests
-pytest -v
-
-# Run simulation
-python simulate_gatekeeper.py --scenario violation --run
-```
-
----
-
 ## How to Download and Configure in Another Project's CI/CD
 
-To use AI Quality Gatekeeper in another repository (Python, Node.js, Go, Java, Rust, etc.), follow these steps:
+To use AI Quality Gatekeeper in another repository (Python, Node.js, Go, Java, Rust, etc.):
 
-### Step 1: Add Guidelines to the Target Repository
-Create `docs/guidelines.md` in the root of your target project. This file serves as the **Context Harness** that the LLM uses to evaluate code:
+### Step 1: Add Guidelines to Target Repository
+Create `docs/guidelines.md` in the root of your target project:
 
 ```markdown
 # Repository Architecture Guidelines
 
 ## 1. Security
-- Never commit credentials, tokens, or plain-text connection strings.
+- Never commit credentials, tokens, or plain-text connection strings (BLOCKER).
 - All database queries must be parameterized. No string concatenation in SQL (BLOCKER).
 
 ## 2. Quality
@@ -155,20 +201,13 @@ Create `docs/guidelines.md` in the root of your target project. This file serves
 - New endpoints and domain services must include unit or integration tests (BLOCKER).
 ```
 
-### Step 2: Add Secret to Target GitHub Repository
+### Step 2: Add Secrets to Target GitHub Repository
 1. In your target repository on GitHub, navigate to **Settings** > **Secrets and variables** > **Actions**.
 2. Click **New repository secret**.
-3. Name: `GOOGLE_API_KEY`.
-4. Value: Your Gemini API key from [Google AI Studio](https://aistudio.google.com/).
-
----
+3. Name: `GOOGLE_API_KEY` (Value from [Google AI Studio](https://aistudio.google.com/)).
+4. (Optional) Name: `SONAR_TOKEN` and `SONAR_HOST_URL` if using SonarQube Web API.
 
 ### Step 3: Configure CI/CD Workflow in Target Project
-
-Choose one of the two integration methods below:
-
-#### Option A: Lightweight Download via Remote Script (Recommended)
-This method does not require copying source code into your repository. The workflow downloads `gatekeeper.py` directly during CI execution.
 
 Create `.github/workflows/ai-gatekeeper.yml` in your target repository:
 
@@ -201,10 +240,16 @@ jobs:
         run: |
           pip install langgraph>=0.2.0 langchain-google-genai>=2.0.0 pydantic>=2.0.0 python-dotenv>=1.0.0
 
-      # Adapt this step to your project stack (npm test, pytest, cargo test, go test, etc.)
+      # Adapt this step to your project test stack
       - name: Run Project Tests
         run: |
           pytest > tests.log 2>&1 || true
+
+      # (Optional) Run SonarScanner and output JSON or SARIF report
+      - name: Run SonarQube Scan
+        run: |
+          # sonar-scanner -Dsonar.issuesReport.html.enable=false -Dsonar.issuesReport.json.enable=true
+          echo "Sonar scan placeholder"
 
       - name: Extract PR Diff
         run: |
@@ -213,8 +258,12 @@ jobs:
       - name: Download and Run Gatekeeper
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           curl -sSL https://raw.githubusercontent.com/JPCalsavara/ai-gatekeeper/main/gatekeeper.py -o gatekeeper.py
+          curl -sSL https://raw.githubusercontent.com/JPCalsavara/ai-gatekeeper/main/sonar_adapter.py -o sonar_adapter.py
+          curl -sSL https://raw.githubusercontent.com/JPCalsavara/ai-gatekeeper/main/context_harness.py -o context_harness.py
           python gatekeeper.py
 
       - name: Post PR Comment
@@ -225,62 +274,4 @@ jobs:
           if [ -f report.md ]; then
             gh pr comment ${{ github.event.pull_request.number }} --body-file report.md
           fi
-```
-
----
-
-#### Option B: Standalone Copy into Target Project
-If you prefer full local ownership or customization of the gatekeeper logic in the target repo:
-
-1. Copy the following files into your target repository:
-   - `gatekeeper.py` (into root or `.github/scripts/`)
-   - `requirements.txt` (or append dependencies to your project dependencies)
-   - `.github/workflows/gatekeeper.yml`
-2. Adjust paths in `.github/workflows/gatekeeper.yml`:
-   ```yaml
-   - name: Run Gatekeeper
-     env:
-       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-     run: |
-       python gatekeeper.py
-   ```
-
----
-
-### Example PR Comment Output
-
-When executed in CI, the Gatekeeper posts a formatted report on the pull request:
-
-```markdown
-## AI Quality Gatekeeper Report
-
-### Supervisor Verdict
-REJECTED: The pull request contains a failing unit test in tests/test_calc.py and a BLOCKER violation regarding SQL string concatenation in services/user_service.py.
-
-### Test Execution Status
-Test test_divide failed with ZeroDivisionError at line 15 in tests/test_calc.py. The calculation function does not handle divisor == 0.
-
-Suggested patch:
-```python
-def calculate_ratio(dividend: float, divisor: float) -> float:
-    if divisor == 0:
-        return 0.0
-    return dividend / divisor
-```
-
-<details>
-<summary><b>Code Review Findings</b></summary>
-
-- BLOCKER: User query in get_user_by_name uses string formatting f"SELECT * FROM users WHERE username = '{username}'". Use parameterized queries.
-- BLOCKER: Empty except Exception block suppresses errors silently.
-</details>
-
----
-### Execution Telemetry (LLMOps)
-| Agent | Model | Tokens | Time | Est. Cost |
-| :--- | :--- | :--- | :--- | :--- |
-| `tests` | `gemini-2.5-flash` | 820 | 0.45s | `$0.00012` |
-| `review` | `gemini-2.5-flash` | 940 | 0.52s | `$0.00014` |
-| `supervisor` | `gemini-2.5-pro` | 1,450 | 1.82s | `$0.00215` |
-| **TOTAL** | — | **3,210** | **2.79s** | **`$0.00241 USD`** |
 ```
