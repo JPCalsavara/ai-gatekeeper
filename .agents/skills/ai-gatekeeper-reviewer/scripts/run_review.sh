@@ -14,6 +14,7 @@ BASE_BRANCH="main"
 SKIP_TESTS=false
 SKIP_SONAR=false
 SKIP_HARNESS=false
+APPLY_PATCH=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-harness)
       SKIP_HARNESS=true
+      shift
+      ;;
+    --apply-patch)
+      APPLY_PATCH=true
       shift
       ;;
     *)
@@ -75,6 +80,13 @@ fi
 # 2. Extract Git Diff
 echo "[STEP 2/5] Extracting Git diff..."
 DIFF_FILE="${TARGET_DIR}/diff.txt"
+
+# Auto-heal shallow repositories (common in CI/CD environments like GitHub Actions)
+if [[ "$(git -C "$TARGET_DIR" rev-parse --is-shallow-repository 2>/dev/null || echo "false")" == "true" ]]; then
+  echo "[INFO] Shallow Git clone detected. Fetching historical commits for base branch..."
+  git -C "$TARGET_DIR" fetch --depth=50 origin "$BASE_BRANCH" 2>/dev/null || true
+fi
+
 # First check if there is an unstaged or staged working tree diff
 git -C "$TARGET_DIR" diff > "$DIFF_FILE" || true
 if [[ ! -s "$DIFF_FILE" ]]; then
@@ -129,12 +141,18 @@ fi
 # 5. Execute LangGraph Gatekeeper
 echo "[STEP 5/5] Executing AI Quality Gatekeeper..."
 EXIT_CODE=0
+GATEKEEPER_ARGS=(--target /target)
+[[ "$APPLY_PATCH" == true ]] && GATEKEEPER_ARGS+=(--apply-patch)
+
+LOCAL_GATEKEEPER_ARGS=(--target "$TARGET_DIR")
+[[ "$APPLY_PATCH" == true ]] && LOCAL_GATEKEEPER_ARGS+=(--apply-patch)
+
 if command -v docker &>/dev/null && [[ -f "${GATEKEEPER_ROOT}/docker-compose.yml" ]]; then
   docker compose -f "${GATEKEEPER_ROOT}/docker-compose.yml" run --rm \
     -v "${TARGET_DIR}:/target" \
-    test python3 -u gatekeeper.py --target /target || EXIT_CODE=$?
+    test python3 -u gatekeeper.py "${GATEKEEPER_ARGS[@]}" || EXIT_CODE=$?
 else
-  python3 "${GATEKEEPER_ROOT}/gatekeeper.py" --target "$TARGET_DIR" || EXIT_CODE=$?
+  python3 "${GATEKEEPER_ROOT}/gatekeeper.py" "${LOCAL_GATEKEEPER_ARGS[@]}" || EXIT_CODE=$?
 fi
 
 echo "=== Review Completed ==="

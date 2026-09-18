@@ -2,3 +2,8 @@ langgraph>=0.2.0
 langchain-google-genai>=2.0.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0
+
+# Optional Multi-Provider Dependencies (only if not using default Google Gemini):
+# langchain-openai>=0.2.0       # If LLM_PROVIDER=openai
+# langchain-anthropic>=0.2.0    # If LLM_PROVIDER=anthropic
+# langchain-community>=0.2.0    # If LLM_PROVIDER=ollama

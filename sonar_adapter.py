@@ -134,17 +134,40 @@ def fetch_sonar_api_issues() -> List[SonarIssue]:
         print(f"[WARN] Failed to query SonarQube Web API: {e}")
     return []
 
-def get_sonar_report(workspace_dir: Path = Path(".")) -> str:
-    """Collects SonarQube issues from files or direct API and formats them for agent consumption."""
+def extract_modified_files(diff_text: str) -> set:
+    """Extracts the set of normalized file paths modified in the git diff."""
+    files = set()
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git a/"):
+            parts = line.split()
+            if len(parts) >= 4:
+                b_path = parts[3]
+                if b_path.startswith("b/"):
+                    files.add(b_path[2:].strip())
+        elif line.startswith("+++ b/"):
+            path = line[6:].strip()
+            if path and path != "/dev/null":
+                files.add(path)
+    return files
+
+def get_sonar_report(workspace_dir: Path = Path("."), diff_text: str = "") -> str:
+    """
+    Collects SonarQube issues from files or direct API and formats them for agent consumption.
+    If diff_text is provided, filters issues so only files touched in the diff affect the quality gate.
+    """
     issues: List[SonarIssue] = []
 
-    # Priority 1: Check local JSON report
+    # Priority 1: Check local JSON report (both hyphen and underscore variants)
     json_path = workspace_dir / "sonar-report.json"
+    if not json_path.exists():
+        json_path = workspace_dir / "sonar_report.json"
     if json_path.exists():
         issues.extend(parse_sonar_json(json_path))
 
-    # Priority 2: Check SARIF report
+    # Priority 2: Check SARIF report (both hyphen and underscore variants)
     sarif_path = workspace_dir / "sonar-report.sarif"
+    if not sarif_path.exists():
+        sarif_path = workspace_dir / "sonar_report.sarif"
     if sarif_path.exists():
         issues.extend(parse_sarif_json(sarif_path))
 
@@ -154,6 +177,31 @@ def get_sonar_report(workspace_dir: Path = Path(".")) -> str:
 
     if not issues:
         return ""
+
+    # Filter against active diff files if diff is present
+    if diff_text.strip():
+        modified_files = extract_modified_files(diff_text)
+        if modified_files:
+            active_issues = []
+            historical_count = 0
+            for issue in issues:
+                # Match normalized file path or suffix
+                if any(issue.file_path.endswith(f) or f.endswith(issue.file_path) for f in modified_files):
+                    active_issues.append(issue)
+                else:
+                    historical_count += 1
+
+            if not active_issues:
+                if historical_count > 0:
+                    return f"[PASSED] No SonarQube issues detected in modified files ({historical_count} pre-existing baseline issues on untouched files ignored)."
+                return ""
+
+            lines = [
+                f"SonarQube detected {len(active_issues)} issue(s) on modified files (ignored {historical_count} pre-existing issues on untouched files):"
+            ]
+            for issue in active_issues[:30]:
+                lines.append(issue.format_line())
+            return "\n".join(lines)
 
     lines = [
         f"SonarQube detected {len(issues)} issue(s):"

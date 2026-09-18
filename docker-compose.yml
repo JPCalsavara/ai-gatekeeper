@@ -8,6 +8,7 @@ services:
       - path: .env
         required: false
     environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - PYTHONPATH=/app
@@ -21,6 +22,7 @@ services:
       dockerfile: Dockerfile
     container_name: ai-gatekeeper-test
     environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-mock-test-key}
       - PYTHONPATH=/app
     volumes:
@@ -36,6 +38,7 @@ services:
       - path: .env
         required: false
     environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - PYTHONPATH=/app

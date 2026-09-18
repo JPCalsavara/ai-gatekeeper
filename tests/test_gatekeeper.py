@@ -275,3 +275,122 @@ def test_generate_report_formatting():
     assert "gemini-2.5-flash" in report
     assert "gemini-2.5-pro" in report
     assert "TOTAL" in report
+
+def test_clean_diff_filters_lockfiles():
+    """Verifies that high-noise lockfiles are filtered out while source code is preserved."""
+    from gatekeeper import clean_diff
+    raw_diff = """diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -1,3 +1,3 @@
+-print("old")
++print("new")
+diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,5 +1,5 @@
+-"version": "1.0.0"
++"version": "1.0.1"
+"""
+    cleaned = clean_diff(raw_diff)
+    assert "src/app.py" in cleaned
+    assert "print(\"new\")" in cleaned
+    assert "[IGNORED NOISY FILE: package-lock.json]" in cleaned
+    assert '"version": "1.0.1"' not in cleaned
+
+def test_clean_diff_truncates_large_diff():
+    """Verifies that diffs exceeding max_chars budget are truncated gracefully."""
+    from gatekeeper import clean_diff
+    large_diff = "diff --git a/big.py b/big.py\n" + ("x" * 2000)
+    cleaned = clean_diff(large_diff, max_chars=500)
+    assert len(cleaned) <= 650
+    assert "[DIFF TRUNCATED:" in cleaned
+
+def test_diff_aware_sonar_filtering(tmp_path):
+    """Verifies that SonarQube issues in untouched files are ignored."""
+    from sonar_adapter import get_sonar_report
+    import json
+
+    report_file = tmp_path / "sonar-report.json"
+    report_file.write_text(json.dumps({
+        "total": 2,
+        "issues": [
+            {
+                "key": "AY123456",
+                "rule": "python:S2077",
+                "severity": "BLOCKER",
+                "component": "ai-gatekeeper:services/user_service.py",
+                "line": 14,
+                "message": "Formatting SQL queries is security-sensitive.",
+                "type": "VULNERABILITY"
+            },
+            {
+                "key": "AY123457",
+                "rule": "python:S112",
+                "severity": "MAJOR",
+                "component": "ai-gatekeeper:controllers/payment_controller.py",
+                "line": 17,
+                "message": "Do not raise generic exceptions.",
+                "type": "CODE_SMELL"
+            }
+        ]
+    }))
+
+    # 1. When diff touches services/user_service.py -> only user_service issue is reported
+    diff_touching_user = """diff --git a/services/user_service.py b/services/user_service.py
++++ b/services/user_service.py
+@@ -1,1 +1,1 @@
+"""
+    report_touched = get_sonar_report(tmp_path, diff_touching_user)
+    assert "services/user_service.py" in report_touched
+    assert "controllers/payment_controller.py" not in report_touched
+    assert "ignored 1 pre-existing issues on untouched files" in report_touched
+
+    # 2. When diff touches an unrelated file -> reported issues are 0 (passed)
+    diff_unrelated = """diff --git a/other/file.py b/other/file.py
++++ b/other/file.py
+"""
+    report_unrelated = get_sonar_report(tmp_path, diff_unrelated)
+    assert "[PASSED]" in report_unrelated
+    assert "2 pre-existing baseline issues on untouched files ignored" in report_unrelated
+
+def test_vector_normalization_and_fast_dot():
+    """Tests L2 vector normalization and fast dot product similarity."""
+    from context_harness import normalize_vector, fast_dot_product
+    v1 = [3.0, 4.0]
+    norm_v1 = normalize_vector(v1)
+    assert pytest.approx(norm_v1[0], 0.001) == 0.6
+    assert pytest.approx(norm_v1[1], 0.001) == 0.8
+
+    # Dot product of identical unit vectors must equal 1.0
+    assert pytest.approx(fast_dot_product(norm_v1, norm_v1), 0.001) == 1.0
+
+def test_llm_factory_pricing_and_provider():
+    """Validates multi-provider factory resolving models and pricing."""
+    from llm_factory import get_provider, get_pricing_info
+    assert get_provider() in ["gemini", "openai", "anthropic", "ollama"]
+    flash_pricing = get_pricing_info("flash")
+    pro_pricing = get_pricing_info("pro")
+    assert "name" in flash_pricing
+    assert "in" in flash_pricing
+    assert "out" in flash_pricing
+    assert "name" in pro_pricing
+
+def test_extract_patch():
+    """Tests extracting markdown unified diff patch blocks."""
+    from gatekeeper import extract_patch
+    text_with_patch = """Here is the suggested fix:
+```diff
+--- a/main.py
++++ b/main.py
+@@ -1 +1 @@
+-old
++new
+```
+That should fix it."""
+    extracted = extract_patch(text_with_patch)
+    assert extracted.startswith("--- a/main.py")
+    assert "+new" in extracted
+
+    # When no patch block exists
+    assert extract_patch("No patch provided.") == ""

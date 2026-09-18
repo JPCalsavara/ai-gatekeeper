@@ -11,27 +11,106 @@ from langgraph.graph import StateGraph, START, END
 
 from sonar_adapter import get_sonar_report
 from context_harness import retrieve_relevant_guidelines
+from llm_factory import get_chat_model, get_pricing_info
 
 load_dotenv()
 
-# Synchronize API keys between GOOGLE_API_KEY and GEMINI_API_KEY
-api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-if api_key and not os.getenv("GOOGLE_API_KEY"):
-    os.environ["GOOGLE_API_KEY"] = api_key
-
-# Reference Model Pricing (per 1M tokens)
-FLASH_MODEL_NAME = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.5-flash-lite")
-PRO_MODEL_NAME = os.getenv("GEMINI_PRO_MODEL", "gemini-3.5-flash-lite")
-
+# Reference Model Pricing (per 1M tokens) resolved via factory
 PRICING = {
-    "flash": {"name": FLASH_MODEL_NAME, "in": 0.075, "out": 0.30},
-    "pro": {"name": PRO_MODEL_NAME, "in": 1.25 if "pro" in PRO_MODEL_NAME else 0.075, "out": 5.00 if "pro" in PRO_MODEL_NAME else 0.30}
+    "flash": get_pricing_info("flash"),
+    "pro": get_pricing_info("pro")
 }
 
-# Initialization with key fallback to allow imports during test execution and mocking
-_init_key = api_key or "mock-key-for-init"
-flash_llm = ChatGoogleGenerativeAI(model=PRICING["flash"]["name"], temperature=0.1, google_api_key=_init_key)
-pro_llm = ChatGoogleGenerativeAI(model=PRICING["pro"]["name"], temperature=0.2, google_api_key=_init_key)
+# Initialization via factory supporting Gemini, OpenAI, Anthropic, Ollama
+flash_llm = get_chat_model("flash", temperature=0.1)
+pro_llm = get_chat_model("pro", temperature=0.2)
+
+IGNORE_PATTERNS = [
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "poetry.lock",
+    "Cargo.lock",
+    "composer.lock",
+    ".min.js",
+    ".min.css",
+    "dist/",
+    "build/",
+    ".map",
+]
+
+def clean_diff(raw_diff: str, max_chars: int = 40000) -> str:
+    """
+    Cleans raw git diff:
+    1. Filters out high-noise lockfiles, build artifacts, and minified bundles.
+    2. Enforces max_chars limit with graceful truncation warning to prevent token saturation.
+    """
+    if not raw_diff:
+        return ""
+
+    file_chunks = []
+    current_chunk = []
+    current_file = ""
+
+    for line in raw_diff.splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            if current_chunk:
+                file_chunks.append((current_file, "".join(current_chunk)))
+                current_chunk = []
+            parts = line.split()
+            current_file = parts[2][2:] if len(parts) >= 3 and parts[2].startswith("a/") else ""
+        current_chunk.append(line)
+
+    if current_chunk:
+        file_chunks.append((current_file, "".join(current_chunk)))
+
+    kept_chunks = []
+    filtered_count = 0
+    for filename, chunk in file_chunks:
+        if any(pattern in filename for pattern in IGNORE_PATTERNS):
+            filtered_count += 1
+            kept_chunks.append(f"# [IGNORED NOISY FILE: {filename}]\n")
+        else:
+            kept_chunks.append(chunk)
+
+    result = "".join(kept_chunks)
+    if len(result) > max_chars:
+        result = result[:max_chars] + f"\n\n# [DIFF TRUNCATED: Exceeded {max_chars} characters budget to prevent token saturation]\n"
+
+    return result
+
+def extract_patch(text: str) -> str:
+    """Extracts a git diff/patch block from text if present."""
+    import re
+    match = re.search(r"```(?:diff|patch)\n(.*?)\n```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+def apply_patch_if_requested(verdict_text: str, target_dir: Path) -> bool:
+    """Attempts to apply suggested patch to target directory using git apply."""
+    patch_content = extract_patch(verdict_text)
+    if not patch_content:
+        print("[INFO] No unified patch block found in supervisor verdict.")
+        return False
+
+    patch_file = target_dir / "gatekeeper_suggestion.patch"
+    patch_file.write_text(patch_content + "\n", encoding="utf-8")
+    print(f"[INFO] Patch written to {patch_file}")
+
+    import subprocess
+    res = subprocess.run(
+        ["git", "-C", str(target_dir), "apply", "--check", str(patch_file)],
+        capture_output=True,
+        text=True
+    )
+    if res.returncode == 0:
+        subprocess.run(["git", "-C", str(target_dir), "apply", str(patch_file)], check=True)
+        print("[SUCCESS] Successfully applied supervisor suggested patch to workspace.")
+        return True
+    else:
+        print(f"[WARN] Patch could not be automatically applied cleanly: {res.stderr.strip()}")
+        return False
 
 # Shared State Definition
 class AgentMetric(TypedDict):
@@ -223,6 +302,7 @@ def main():
     parser.add_argument("--guidelines", type=str, default=None, help="Path to guidelines.md")
     parser.add_argument("--harness", type=str, default=None, help="Path to context_harness.json")
     parser.add_argument("--output", type=str, default=None, help="Path to report.md output")
+    parser.add_argument("--apply-patch", action="store_true", help="Automatically apply remediation patch to workspace if available")
 
     args = parser.parse_args()
     target_path = Path(args.target).resolve()
@@ -233,10 +313,11 @@ def main():
     harness_path = Path(args.harness) if args.harness else target_path / "context_harness.json"
     report_path = Path(args.output) if args.output else target_path / "report.md"
 
-    diff = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+    raw_diff = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+    diff = clean_diff(raw_diff)
     tests = tests_path.read_text(encoding="utf-8") if tests_path.exists() else ""
     rules = guidelines_path.read_text(encoding="utf-8") if guidelines_path.exists() else ""
-    sonar_report = get_sonar_report(target_path)
+    sonar_report = get_sonar_report(target_path, diff)
 
     if not diff.strip():
         print(f"Diff is empty ({diff_path}). Exiting.")
@@ -255,6 +336,9 @@ def main():
     report = generate_report(result)
     report_path.write_text(report, encoding="utf-8")
     print(report)
+
+    if args.apply_patch:
+        apply_patch_if_requested(result.get("final_verdict", ""), target_path)
 
     verdict = result.get("final_verdict", "").upper()
     if "REJECTED" in verdict or "REPROVADO" in verdict:

@@ -14,6 +14,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+try:
+    import numpy as np
+    HAVE_NUMPY = True
+except ImportError:
+    HAVE_NUMPY = False
+
+def normalize_vector(v: List[float]) -> List[float]:
+    """Returns the L2-normalized unit vector."""
+    norm = sum(x * x for x in v) ** 0.5
+    if norm == 0.0:
+        return v
+    return [x / norm for x in v]
+
+def fast_dot_product(a: List[float], b: List[float]) -> float:
+    """Calculates fast dot product between pre-normalized float vectors."""
+    return sum(x * y for x, y in zip(a, b))
+
 def cosine_similarity(a: List[float], b: List[float]) -> float:
     """Calculates cosine similarity between two float vectors in pure Python."""
     dot = sum(x * y for x, y in zip(a, b))
@@ -87,12 +104,13 @@ def build_harness_index(sources: List[Path], output_file: Path = Path("context_h
 
     index_data = []
     for idx, (chunk, vector) in enumerate(zip(all_chunks, vectors)):
+        norm_vector = normalize_vector(vector)
         index_data.append({
             "id": f"chunk_{idx}",
             "source": chunk["source"],
             "title": chunk["title"],
             "content": chunk["content"],
-            "embedding": vector
+            "embedding": norm_vector
         })
 
     output_file.write_text(json.dumps(index_data, indent=2), encoding="utf-8")
@@ -126,12 +144,19 @@ def retrieve_relevant_guidelines(query: str, index_file: Path = Path("context_ha
             model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001"),
             google_api_key=api_key
         )
-        query_vector = embeddings_model.embed_query(query[:1000])  # Cap query length
+        raw_query_vector = embeddings_model.embed_query(query[:1000])  # Cap query length
+        q_norm = normalize_vector(raw_query_vector)
 
         scored_chunks: List[Tuple[float, Dict]] = []
-        for item in data:
-            sim = cosine_similarity(query_vector, item.get("embedding", []))
-            scored_chunks.append((sim, item))
+        if HAVE_NUMPY and len(data) > 10:
+            emb_matrix = np.array([item["embedding"] for item in data], dtype=float)
+            q_arr = np.array(q_norm, dtype=float)
+            sims = np.dot(emb_matrix, q_arr)
+            scored_chunks = [(float(s), item) for s, item in zip(sims, data)]
+        else:
+            for item in data:
+                sim = fast_dot_product(q_norm, item.get("embedding", []))
+                scored_chunks.append((sim, item))
 
         scored_chunks.sort(key=lambda x: x[0], reverse=True)
 
