@@ -1,34 +1,51 @@
-# Repository Structure
+# Repository Structure & Component Map
+
+The following tree outlines the complete directory layout and component responsibilities of the AI Quality Gatekeeper system:
 
 ```text
 ai-gatekeeper/
 ├── .agents/
 │   └── skills/
-│       └── context-harness/
-│           └── SKILL.md         # 1. Antigravity Agent Skill for indexing guidelines
+│       ├── ai-gatekeeper-reviewer/ # Master Quality Gate reviewer orchestrator
+│       │   ├── SKILL.md            # Skill specification for AGY, Copilot, Claude, GPT
+│       │   └── scripts/
+│       │       └── run_review.sh   # Automated review CLI runner (tests, diff, Sonar, gatekeeper)
+│       ├── sonarqube-runner/       # SonarQube & SonarCloud static analysis runner
+│       │   ├── SKILL.md            # Sonar runner specification
+│       │   └── scripts/
+│       │       └── run_sonar.sh    # Sonar REST API query & Docker scan utility
+│       └── context-harness/        # Local JSON vector index builder
+│           └── SKILL.md            # Guidelines indexing skill specification
 ├── .github/
-│   └── workflows/
-│       └── gatekeeper.yml       # 2. Official GitHub Actions CI/CD Pipeline
+│   ├── workflows/
+│   │   └── gatekeeper.yml          # GitHub Actions CI/CD automated review pipeline
+│   └── copilot-instructions.md     # GitHub Copilot custom workspace instructions
 ├── docs/
-│   ├── guidelines.md            # 3. Context Harness (Architecture rules & standards)
-│   ├── folder_structure.md      # 4. Repository layout documentation
-│   ├── Lean_Canvas_and_MVP_Strategy.md # 5. Product strategy & lean roadmap
-│   └── Lean Canvas & Estratégia de MVP.pdf # 6. Original MVP canvas document
+│   ├── capabilities_and_roadmap.md # Technical capabilities, limitation analysis & roadmap
+│   ├── guidelines.md               # Repository engineering standards (Context Harness)
+│   ├── folder_structure.md         # Repository layout and component map (this document)
+│   ├── Lean_Canvas_and_MVP_Strategy.md # Business model, MVP scope & execution milestones
+│   └── Lean Canvas & Estratégia de MVP.pdf # Original MVP canvas reference document
 ├── tests/
-│   ├── fixtures/                # 7. Sample diffs, logs, and SonarQube reports
-│   ├── conftest.py              # 8. Pytest fixtures and mocks
-│   └── test_gatekeeper.py       # 9. Automated unit and integration test suite
-├── .env.example                 # 10. Environment variable configuration template
-├── .gitignore                   # 11. Files ignored by Git
-├── build_harness.py             # 12. CLI to scan docs and generate local vector index
-├── context_harness.py           # 13. Semantic retrieval engine with pure Python cosine similarity
-├── docker-compose.yml           # 14. Multi-container orchestration (gatekeeper, test, simulate, harness)
-├── Dockerfile                   # 15. Standardized Python container image
-├── gatekeeper.py                # 16. Core LangGraph engine, LLM models, and telemetry
-├── pytest.ini                   # 17. Pytest configuration
-├── README.md                    # 18. Project documentation & CI/CD setup guide
-├── requirements.txt             # 19. Core production dependencies
-├── requirements-dev.txt         # 20. Development and testing dependencies
-├── simulate_gatekeeper.py       # 21. Local CLI simulation runner with Sonar support
-└── sonar_adapter.py             # 22. SonarQube/SonarCloud SARIF, JSON, and Web API adapter
+│   ├── fixtures/                   # Sample diffs, logs, and SonarQube reports
+│   │   ├── sample_diff.txt         # Clean and blocker git diff samples
+│   │   ├── sample_tests.log        # Passing and failing test suite logs
+│   │   └── sonar_report.json       # Mock SonarQube issues report
+│   ├── conftest.py                 # Pytest fixtures and mock objects
+│   └── test_gatekeeper.py          # Automated unit and integration test suite (12 tests)
+├── AGENTS.md                       # Universal AI agent guidelines and skill registry
+├── CLAUDE.md                       # Claude Code assistant commands and guidelines
+├── .env.example                    # Environment variable configuration template
+├── .gitignore                      # Git ignored files and cache patterns
+├── build_harness.py                # CLI to scan docs and generate local vector index
+├── context_harness.py              # Semantic retrieval engine with pure Python cosine similarity
+├── docker-compose.yml              # Container orchestration (gatekeeper, test, simulate, harness)
+├── Dockerfile                      # Standardized Python 3.11 container image
+├── gatekeeper.py                   # Core LangGraph execution engine, multi-agent nodes & telemetry
+├── pytest.ini                      # Pytest configuration
+├── README.md                       # Project overview, SonarQube .env guide & CI/CD setup
+├── requirements.txt                # Core production runtime dependencies
+├── requirements-dev.txt            # Testing and development dependencies
+├── simulate_gatekeeper.py          # Local CLI scenario simulator (clean, violation, test failure)
+└── sonar_adapter.py                # SonarQube/SonarCloud REST API, JSON, and SARIF adapter
 ```
