@@ -198,42 +198,87 @@ If your CI/CD runner already executes SonarScanner CLI or exports GitHub Code Sc
 
 ---
 
+## Open Source Skills Ecosystem (skills.sh & Claude Code)
+
+This repository strictly adheres to the open-source agent skills standard established by [mattpocock/skills](https://github.com/mattpocock/skills), compatible with **skills.sh**, **Google Antigravity (AGY)**, **GitHub Copilot**, **Claude Code**, and **Cursor / GPT**.
+
+### 1. Install via skills.sh (Any Agent, Fully Editable)
+Copy the skills directly into any project workspace:
+```bash
+npx skills@latest add JPCalsavara/ai-gatekeeper
+```
+You can select individual skills (e.g. `ai-gatekeeper-reviewer`, `sonarqube-runner`, `context-harness`, `code-review`, `grill-me`, `implement`, `tdd`).
+
+### 2. Install as Claude Code Plugin
+Add this repository to Claude Code's plugin marketplace:
+```bash
+/plugin marketplace add https://github.com/JPCalsavara/ai-gatekeeper
+/plugin install ai-gatekeeper
+```
+
+### 3. Initialize Repo Configuration (/setup-matt-pocock-skills)
+In any target project, run:
+```bash
+/setup-matt-pocock-skills
+```
+This configures:
+- **`docs/agents/issue-tracker.md`**: Points to GitHub (`gh` CLI), GitLab, or local files.
+- **`docs/agents/domain.md`**: Outlines consumer rules for `CONTEXT.md` and ADRs.
+- **`docs/agents/triage-labels.md`**: Sets up canonical triage roles (`needs-triage`, `ready-for-agent`, etc.).
+- **`CONTEXT.md`**: Ubiquitous domain language and concepts to avoid.
+
+---
+
 ## Repository Structure
 
 ```text
 ai-gatekeeper/
 ├── .agents/
 │   └── skills/
-│       ├── ai-gatekeeper-reviewer/ # Universal multi-agent review orchestrator
-│       │   ├── SKILL.md
-│       │   └── scripts/run_review.sh
-│       ├── sonarqube-runner/       # SonarQube / SonarCloud API & scanner runner
-│       │   ├── SKILL.md
-│       │   └── scripts/run_sonar.sh
-│       └── context-harness/        # Local JSON vector index builder
-│           └── SKILL.md
+│       ├── ai-gatekeeper-reviewer/ # Master PR quality review orchestrator (user-invoked)
+│       ├── sonarqube-runner/       # SonarQube/SonarCloud API & scanner runner
+│       ├── context-harness/        # Local JSON vector index builder
+│       ├── setup-matt-pocock-skills/# Repo setup for tracker, labels, and domain
+│       ├── ask-matt/               # Router for engineering & productivity skills
+│       ├── code-review/            # Two-axis review (Standards + Spec)
+│       ├── grill-me/               # Interactive architectural interview
+│       ├── grill-with-docs/        # Interview updating CONTEXT.md and ADRs
+│       ├── implement/              # Spec-to-code execution loop with TDD
+│       ├── tdd/                    # Test-driven development red-green-refactor
+│       ├── diagnosing-bugs/        # Deterministic debugging loop
+│       ├── domain-modeling/        # Ubiquitous language sharpening
+│       ├── to-spec/ & to-tickets/  # Synthesis into GitHub specs and tickets
+│       ├── triage/                 # Issue triage state machine
+│       ├── wayfinder/              # Multi-session initiative dependency mapper
+│       └── ...                     # Complete Matt Pocock engineering suite
+├── .claude-plugin/
+│   ├── marketplace.json         # Claude Code plugin registry catalog
+│   └── plugin.json              # Plugin manifest
 ├── .github/
-│   ├── workflows/
-│   │   └── gatekeeper.yml       # Official CI/CD workflow
+│   ├── workflows/gatekeeper.yml # Official CI/CD workflow
 │   └── copilot-instructions.md  # GitHub Copilot custom instructions
-├── AGENTS.md                    # Universal AI agent guide (AGY, Copilot, Claude, GPT)
-├── CLAUDE.md                    # Claude Code instructions and commands
+├── AGENTS.md                    # Agent skills registry and guidelines
+├── CLAUDE.md                    # Symlink to AGENTS.md
+├── CONTEXT.md                   # Ubiquitous domain glossary & terminology
 ├── docs/
-│   ├── guidelines.md            # Repository standards (Context Harness)
+│   ├── adr/                     # Architectural Decision Records (ADRs)
+│   ├── agents/                  # Domain, issue-tracker, and triage-labels configs
+│   ├── guidelines.md            # Architecture standards (Context Harness)
+│   ├── capabilities_and_roadmap.md # Technical capabilities & roadmap
 │   ├── folder_structure.md      # Detailed folder layout documentation
-│   ├── Lean_Canvas_and_MVP_Strategy.md # Lean canvas and MVP roadmap
-│   └── Lean Canvas & Estratégia de MVP.pdf # Original MVP canvas document
+│   └── Lean_Canvas_and_MVP_Strategy.md # Lean canvas and strategy
 ├── tests/
 │   ├── fixtures/                # Sample diffs, logs, and SonarQube reports
 │   ├── conftest.py              # Pytest fixtures and mock objects
 │   └── test_gatekeeper.py       # Automated unit and integration test suite
 ├── .env.example                 # Environment variables template
-├── .gitignore                   # Git ignore patterns
 ├── build_harness.py             # CLI to scan docs and generate local vector index
-├── context_harness.py           # Semantic retrieval engine with pure Python cosine similarity
+├── context_harness.py           # Semantic retrieval engine with fast dot product
 ├── docker-compose.yml           # Docker services orchestration
 ├── Dockerfile                   # Python 3.11 slim container definition
 ├── gatekeeper.py                # Core LangGraph execution engine
+├── llm_factory.py               # Multi-provider LLM gateway (Gemini, OpenAI, Anthropic, Ollama)
+├── package.json                 # npm and skills.sh manifest
 ├── pytest.ini                   # Pytest configuration
 ├── README.md                    # Project documentation & CI/CD setup guide
 ├── requirements.txt             # Core production dependencies

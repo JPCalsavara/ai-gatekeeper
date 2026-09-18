@@ -1,6 +1,7 @@
 ---
 name: ai-gatekeeper-reviewer
 description: Universal Quality Gatekeeper skill to orchestrate end-to-end PR and branch code reviews with LangGraph dynamic tiering, test failure triage, SonarQube static analysis, and Context Harness semantic matching. Cross-compatible with Antigravity, GitHub Copilot, Claude Code, and GPT / Cursor.
+disable-model-invocation: true
 ---
 
 # Universal AI Gatekeeper Reviewer Skill

@@ -1,0 +1,9 @@
+{
+  "name": "ai-gatekeeper",
+  "description": "Autonomous PR Quality Gatekeeper and engineering skills ecosystem with LangGraph and Dynamic Model Tiering.",
+  "version": "1.0.0",
+  "author": {
+    "name": "JPCalsavara",
+    "url": "https://github.com/JPCalsavara/ai-gatekeeper"
+  }
+}

@@ -60,4 +60,4 @@ services:
       - PYTHONPATH=/app
     volumes:
       - .:/app
-    command: python build_harness.py --docs docs README.md --output context_harness.json
+    command: python build_harness.py --docs docs/guidelines.md CONTEXT.md docs/adr README.md --output context_harness.json

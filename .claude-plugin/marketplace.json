@@ -1,0 +1,12 @@
+{
+  "name": "ai-gatekeeper",
+  "description": "Autonomous PR Quality Gatekeeper and engineering skills ecosystem with LangGraph and Dynamic Model Tiering.",
+  "plugins": [
+    {
+      "name": "ai-gatekeeper",
+      "description": "Autonomous PR Quality Gatekeeper and engineering skills.",
+      "version": "1.0.0",
+      "source": "."
+    }
+  ]
+}

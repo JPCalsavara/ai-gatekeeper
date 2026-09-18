@@ -1,0 +1,19 @@
+{
+  "name": "ai-gatekeeper",
+  "version": "1.0.0",
+  "description": "Autonomous PR Quality Gatekeeper and engineering skills ecosystem with LangGraph and Dynamic Model Tiering.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JPCalsavara/ai-gatekeeper"
+  },
+  "keywords": [
+    "ai-agent",
+    "skills",
+    "code-review",
+    "quality-gate",
+    "langgraph",
+    "sonarqube",
+    "context-harness"
+  ]
+}

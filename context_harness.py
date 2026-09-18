@@ -100,7 +100,23 @@ def build_harness_index(sources: List[Path], output_file: Path = Path("context_h
         return 0
 
     texts = [f"{c['title']}\n{c['content']}" for c in all_chunks]
-    vectors = embeddings_model.embed_documents(texts)
+    vectors = []
+    batch_size = 15
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        for attempt in range(5):
+            try:
+                batch_vectors = embeddings_model.embed_documents(batch)
+                vectors.extend(batch_vectors)
+                break
+            except Exception as e:
+                if ("RESOURCE_EXHAUSTED" in str(e) or "429" in str(e)) and attempt < 4:
+                    import time
+                    wait_s = 20 * (attempt + 1)
+                    print(f"[WARN] Embedding quota limit hit. Retrying in {wait_s}s (attempt {attempt + 1}/5)...")
+                    time.sleep(wait_s)
+                else:
+                    raise e
 
     index_data = []
     for idx, (chunk, vector) in enumerate(zip(all_chunks, vectors)):
