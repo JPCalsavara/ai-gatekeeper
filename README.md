@@ -80,23 +80,83 @@ An Antigravity skill is included in [`.agents/skills/context-harness/SKILL.md`](
 
 ---
 
-## SonarQube & SonarCloud Integration
+## SonarQube & SonarCloud Integration (.env, IDE & CI/CD Guide)
 
-The Gatekeeper natively supports SonarQube through three channels:
+The Gatekeeper connects to SonarQube and SonarCloud through a unified static analysis adapter (`sonar_adapter.py`). Consuming issues directly via the **REST API** is the simplest, most lightweight approach—requiring zero local scanner installations or Docker overhead.
 
-### 1. File-Based Ingestion (Recommended for CI/CD)
-When your CI pipeline runs SonarScanner, configure it to output a report into the workspace:
-- **JSON Report:** Place `sonar-report.json` in the workspace root.
-- **SARIF Report:** Place `sonar-report.sarif` in the workspace root (standard GitHub Code Scanning format).
+### 1. Environment Configuration (`.env`)
 
-### 2. Direct Web API Query
-If running in an environment with network access to your SonarQube server, set the following environment variables:
-- `SONAR_HOST_URL`: Base URL (e.g., `https://sonarcloud.io` or `http://sonar.internal:9000`).
-- `SONAR_TOKEN`: User or project analysis token.
-- `SONAR_PROJECT_KEY`: Sonar project identifier.
-- `PR_NUMBER`: (Optional) Restricts queries to issues introduced in the active pull request.
+Configure your `.env` file in the project root:
 
-`sonar_adapter.py` will query `/api/issues/search`, parse unresolved issues, and feed them into the `sonar_triage` node.
+#### Scenario A: Personal & Small Projects (SonarCloud Free Tier + GitHub)
+SonarCloud offers free automated static analysis for public GitHub repositories:
+1. Sign in to [sonarcloud.io](https://sonarcloud.io/) using your GitHub account.
+2. Import your repository. Note your **Project Key** (e.g., `octocat_my-project`).
+3. Generate a security token under **My Account > Security > Generate Token**.
+4. Set the following variables in `.env`:
+   ```bash
+   SONAR_HOST_URL=https://sonarcloud.io
+   SONAR_TOKEN=your_sonarcloud_user_token
+   SONAR_PROJECT_KEY=your_project_key
+   ```
+5. *(Optional for PRs)* Set `PR_NUMBER=12` to restrict fetched issues strictly to new issues introduced in that PR.
+
+#### Scenario B: Corporate Environments (Self-Hosted SonarQube)
+For enterprise setups running an internal on-premise SonarQube instance:
+```bash
+SONAR_HOST_URL=http://sonar.internal.company.com:9000
+SONAR_TOKEN=sqp_your_corporate_analysis_token
+SONAR_PROJECT_KEY=internal-project-key
+```
+
+#### Scenario C: Offline / Fallback Mode (Zero Friction)
+If no Sonar credentials or report files are present, the Gatekeeper defaults gracefully to `[PASSED] No SonarQube issues detected.` This ensures local development and onboarding remain unblocked.
+
+---
+
+### 2. Using SonarQube in the IDE (Local Coding & Pair Programming)
+
+While coding in your IDE with **Antigravity (AGY)**, **GitHub Copilot**, **Claude Code**, or **Cursor / GPT**, you can run an instant pre-commit quality review:
+
+```bash
+# Automated review of your working branch
+bash .agents/skills/ai-gatekeeper-reviewer/scripts/run_review.sh --target .
+```
+
+What happens under the hood:
+1. The `sonarqube-runner` queries your configured SonarCloud / SonarQube API for unresolved code smells and vulnerabilities.
+2. The agent correlates detected Sonar issues with the modified lines in your active git diff.
+3. The Supervisor node highlights blockers (e.g., SQL injections, resource leaks) and provides immediate patch recommendations in `report.md` before you push.
+
+---
+
+### 3. Using SonarQube in CI/CD (Automated PR Reviewer)
+
+In GitHub Actions, configure repository secrets for `GOOGLE_API_KEY`, `SONAR_TOKEN`, `SONAR_PROJECT_KEY`, and `SONAR_HOST_URL`.
+
+```yaml
+# Sample GitHub Actions Step in .github/workflows/gatekeeper.yml
+- name: Run AI Quality Gatekeeper
+  env:
+    GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+    SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+    SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+    PR_NUMBER: ${{ github.event.pull_request.number }}
+  run: |
+    bash .agents/skills/ai-gatekeeper-reviewer/scripts/run_review.sh --target .
+```
+
+- If SonarQube or guideline violations are marked as **BLOCKER**, the workflow exits with status code `1`, preventing PR merges.
+- If everything passes, the workflow exits with code `0` (APPROVED).
+
+---
+
+### 4. Alternative: File-Based Ingestion (SARIF / JSON)
+If your CI/CD runner already executes SonarScanner CLI or exports GitHub Code Scanning alerts, place the output directly in the project root:
+- **`sonar-report.json`**: Standard SonarQube JSON issues export.
+- **`sonar-report.sarif`**: SARIF 2.1.0 report format.
+`sonar_adapter.py` detects and prioritizes local report files before making API network calls.
 
 ---
 
@@ -115,11 +175,20 @@ If running in an environment with network access to your SonarQube server, set t
 ai-gatekeeper/
 ├── .agents/
 │   └── skills/
-│       └── context-harness/
-│           └── SKILL.md         # Antigravity Agent Skill for indexing guidelines
+│       ├── ai-gatekeeper-reviewer/ # Universal multi-agent review orchestrator
+│       │   ├── SKILL.md
+│       │   └── scripts/run_review.sh
+│       ├── sonarqube-runner/       # SonarQube / SonarCloud API & scanner runner
+│       │   ├── SKILL.md
+│       │   └── scripts/run_sonar.sh
+│       └── context-harness/        # Local JSON vector index builder
+│           └── SKILL.md
 ├── .github/
-│   └── workflows/
-│       └── gatekeeper.yml       # Official CI/CD workflow
+│   ├── workflows/
+│   │   └── gatekeeper.yml       # Official CI/CD workflow
+│   └── copilot-instructions.md  # GitHub Copilot custom instructions
+├── AGENTS.md                    # Universal AI agent guide (AGY, Copilot, Claude, GPT)
+├── CLAUDE.md                    # Claude Code instructions and commands
 ├── docs/
 │   ├── guidelines.md            # Repository standards (Context Harness)
 │   ├── folder_structure.md      # Detailed folder layout documentation
