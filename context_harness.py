@@ -66,7 +66,7 @@ def build_harness_index(sources: List[Path], output_file: Path = Path("context_h
         raise ValueError("Missing GOOGLE_API_KEY or GEMINI_API_KEY for embedding generation.")
 
     embeddings_model = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
+        model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001"),
         google_api_key=api_key
     )
 
@@ -104,8 +104,9 @@ def retrieve_relevant_guidelines(query: str, index_file: Path = Path("context_ha
     Retrieves the top_k most semantically relevant guidelines from context_harness.json.
     Falls back to docs/guidelines.md if index file is not present.
     """
+    fallback_file = (index_file.parent / "docs" / "guidelines.md") if index_file.parent != Path(".") else Path("docs/guidelines.md")
+
     if not index_file.exists():
-        fallback_file = Path("docs/guidelines.md")
         if fallback_file.exists():
             return fallback_file.read_text(encoding="utf-8")
         return ""
@@ -119,11 +120,10 @@ def retrieve_relevant_guidelines(query: str, index_file: Path = Path("context_ha
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
             # Fallback to static text if no API key is available for query embedding
-            fallback_file = Path("docs/guidelines.md")
             return fallback_file.read_text(encoding="utf-8") if fallback_file.exists() else ""
 
         embeddings_model = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
+            model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001"),
             google_api_key=api_key
         )
         query_vector = embeddings_model.embed_query(query[:1000])  # Cap query length
@@ -142,5 +142,4 @@ def retrieve_relevant_guidelines(query: str, index_file: Path = Path("context_ha
         return "\n\n".join(results)
     except Exception as e:
         print(f"[WARN] Error in semantic retrieval: {e}. Using fallback.")
-        fallback_file = Path("docs/guidelines.md")
         return fallback_file.read_text(encoding="utf-8") if fallback_file.exists() else ""

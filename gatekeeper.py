@@ -20,9 +20,12 @@ if api_key and not os.getenv("GOOGLE_API_KEY"):
     os.environ["GOOGLE_API_KEY"] = api_key
 
 # Reference Model Pricing (per 1M tokens)
+FLASH_MODEL_NAME = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.5-flash-lite")
+PRO_MODEL_NAME = os.getenv("GEMINI_PRO_MODEL", "gemini-3.5-flash-lite")
+
 PRICING = {
-    "flash": {"name": "gemini-2.5-flash", "in": 0.075, "out": 0.30},
-    "pro": {"name": "gemini-2.5-pro", "in": 1.25, "out": 5.00}
+    "flash": {"name": FLASH_MODEL_NAME, "in": 0.075, "out": 0.30},
+    "pro": {"name": PRO_MODEL_NAME, "in": 1.25 if "pro" in PRO_MODEL_NAME else 0.075, "out": 5.00 if "pro" in PRO_MODEL_NAME else 0.30}
 }
 
 # Initialization with key fallback to allow imports during test execution and mocking
@@ -38,9 +41,10 @@ class AgentMetric(TypedDict):
     duration_s: float
     cost_usd: float
 
-class ReviewState(TypedDict):
+class ReviewState(TypedDict, total=False):
     pr_diff: str
     harness_rules: str
+    harness_file: str
     test_logs: str
     sonar_issues: str
     test_analysis: str
@@ -49,6 +53,20 @@ class ReviewState(TypedDict):
     final_verdict: str
     # operator.or_ merges dictionaries from parallel branches without state collisions in LangGraph
     telemetry: Annotated[Dict[str, AgentMetric], operator.or_]
+
+def extract_text(content) -> str:
+    """Safely extracts plain text from LangChain message content (str or list of dicts)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and "text" in part:
+                parts.append(part["text"])
+        return "\n".join(parts)
+    return str(content)
 
 # Helper for Telemetry and Cost Calculation
 def run_agent(llm, tier: str, messages: list):
@@ -70,7 +88,7 @@ def run_agent(llm, tier: str, messages: list):
         "duration_s": elapsed,
         "cost_usd": cost
     }
-    return response.content, metric
+    return extract_text(response.content), metric
 
 # Specialist Nodes
 def test_diagnostics_node(state: ReviewState):
@@ -80,7 +98,7 @@ def test_diagnostics_node(state: ReviewState):
         return {"test_analysis": "[PASSED] All tests passed with no errors."}
         
     prompt = [
-        SystemMessage(content="You are a test triage specialist. Analyze the test error logs and the PR diff. Identify which test broke, the root cause, and the exact responsible lines in the diff. Provide a fix patch suggestion."),
+        SystemMessage(content="You are a test triage specialist. Analyze the test error logs and the PR diff. Identify which test broke, the root cause, and the exact responsible lines in the diff. Provide a fix patch suggestion. Do not use emojis in your response."),
         HumanMessage(content=f"Test Logs:\n{logs}\n\nPR Diff:\n{state.get('pr_diff', '')}")
     ]
     content, metric = run_agent(flash_llm, "flash", prompt)
@@ -90,15 +108,16 @@ def code_review_node(state: ReviewState):
     """Reviews the PR diff strictly against guidelines (Context Harness)."""
     rules = state.get("harness_rules", "")
     diff = state.get("pr_diff", "")
+    harness_path = Path(state.get("harness_file", "context_harness.json"))
 
-    # If context_harness.json exists, semantically retrieve the most relevant guidelines
-    if Path("context_harness.json").exists():
-        semantic_rules = retrieve_relevant_guidelines(diff, Path("context_harness.json"), top_k=4)
+    # If harness index exists, semantically retrieve the most relevant guidelines
+    if harness_path.exists():
+        semantic_rules = retrieve_relevant_guidelines(diff, harness_path, top_k=4)
         if semantic_rules.strip():
             rules = semantic_rules
 
     prompt = [
-        SystemMessage(content="You are a Staff Engineer. Review the PR diff strictly against repository guidelines (Context Harness). Flag violations categorized as BLOCKER or WARNING with clear remediation guidance."),
+        SystemMessage(content="You are a Staff Engineer. Review the PR diff strictly against repository guidelines (Context Harness). Flag violations categorized as BLOCKER or WARNING with clear remediation guidance. Do not use emojis in your response."),
         HumanMessage(content=f"=== PROJECT GUIDELINES ===\n{rules}\n\n=== PR DIFF ===\n{diff}")
     ]
     content, metric = run_agent(flash_llm, "flash", prompt)
@@ -111,19 +130,23 @@ def sonar_triage_node(state: ReviewState):
         return {"sonar_analysis": "[PASSED] No SonarQube issues detected."}
 
     prompt = [
-        SystemMessage(content="You are a static analysis remediation engineer. Review the reported SonarQube issues and cross-reference them with the PR diff. Highlight blocker vulnerabilities or critical code smells and provide exact code patch remediation."),
+        SystemMessage(content="You are a static analysis remediation engineer. Review the reported SonarQube issues and cross-reference them with the PR diff. Highlight blocker vulnerabilities or critical code smells and provide exact code patch remediation. Do not use emojis in your response."),
         HumanMessage(content=f"SonarQube Issues:\n{issues}\n\nPR Diff:\n{state.get('pr_diff', '')}")
     ]
     content, metric = run_agent(flash_llm, "flash", prompt)
     return {"sonar_analysis": content, "telemetry": {"sonar": metric}}
 
 def supervisor_node(state: ReviewState):
-    """Consolidates findings and issues the final gatekeeper decision with Gemini Pro."""
+    """Consolidates findings and issues the final gatekeeper decision with Gemini Pro (fallback to Flash if needed)."""
     prompt = [
-        SystemMessage(content="You are the Tech Lead responsible for the Quality Gate. Provide the final verdict: APPROVED, APPROVED WITH WARNINGS, or REJECTED. If there is a test failure, SonarQube BLOCKER, or guideline BLOCKER violation, you MUST mark it as REJECTED."),
+        SystemMessage(content="You are the Tech Lead responsible for the Quality Gate. Provide the final verdict: APPROVED, APPROVED WITH WARNINGS, or REJECTED. If there is a test failure, SonarQube BLOCKER, or guideline BLOCKER violation, you MUST mark it as REJECTED. Do not use emojis in your response."),
         HumanMessage(content=f"--- Test Diagnostics ---\n{state.get('test_analysis', '')}\n\n--- Technical Review ---\n{state.get('code_review', '')}\n\n--- SonarQube Analysis ---\n{state.get('sonar_analysis', '')}")
     ]
-    content, metric = run_agent(pro_llm, "pro", prompt)
+    try:
+        content, metric = run_agent(pro_llm, "pro", prompt)
+    except Exception as e:
+        print(f"[WARN] Pro model invocation failed ({e}). Falling back to Flash model for Supervisor.")
+        content, metric = run_agent(flash_llm, "flash", prompt)
     return {"final_verdict": content, "telemetry": {"supervisor": metric}}
 
 # Graph Construction
@@ -192,18 +215,37 @@ def generate_report(result: ReviewState) -> str:
 """
 
 def main():
-    diff = Path("diff.txt").read_text(encoding="utf-8") if Path("diff.txt").exists() else ""
-    tests = Path("tests.log").read_text(encoding="utf-8") if Path("tests.log").exists() else ""
-    rules = Path("docs/guidelines.md").read_text(encoding="utf-8") if Path("docs/guidelines.md").exists() else ""
-    sonar_report = get_sonar_report(Path("."))
+    import argparse
+    parser = argparse.ArgumentParser(description="AI Quality Gatekeeper")
+    parser.add_argument("--target", type=str, default=".", help="Target project root directory")
+    parser.add_argument("--diff", type=str, default=None, help="Path to diff file")
+    parser.add_argument("--tests", type=str, default=None, help="Path to tests.log file")
+    parser.add_argument("--guidelines", type=str, default=None, help="Path to guidelines.md")
+    parser.add_argument("--harness", type=str, default=None, help="Path to context_harness.json")
+    parser.add_argument("--output", type=str, default=None, help="Path to report.md output")
+
+    args = parser.parse_args()
+    target_path = Path(args.target).resolve()
+
+    diff_path = Path(args.diff) if args.diff else target_path / "diff.txt"
+    tests_path = Path(args.tests) if args.tests else target_path / "tests.log"
+    guidelines_path = Path(args.guidelines) if args.guidelines else target_path / "docs" / "guidelines.md"
+    harness_path = Path(args.harness) if args.harness else target_path / "context_harness.json"
+    report_path = Path(args.output) if args.output else target_path / "report.md"
+
+    diff = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+    tests = tests_path.read_text(encoding="utf-8") if tests_path.exists() else ""
+    rules = guidelines_path.read_text(encoding="utf-8") if guidelines_path.exists() else ""
+    sonar_report = get_sonar_report(target_path)
 
     if not diff.strip():
-        print("Diff is empty. Exiting.")
+        print(f"Diff is empty ({diff_path}). Exiting.")
         sys.exit(0)
 
     initial_state = {
         "pr_diff": diff,
         "harness_rules": rules,
+        "harness_file": str(harness_path),
         "test_logs": tests,
         "sonar_issues": sonar_report,
         "telemetry": {}
@@ -211,7 +253,7 @@ def main():
 
     result = app.invoke(initial_state)
     report = generate_report(result)
-    Path("report.md").write_text(report, encoding="utf-8")
+    report_path.write_text(report, encoding="utf-8")
     print(report)
 
     verdict = result.get("final_verdict", "").upper()

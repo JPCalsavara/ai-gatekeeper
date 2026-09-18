@@ -23,8 +23,8 @@ def test_pricing_keys_exist():
     """Validates that pricing models and keys are defined."""
     assert "flash" in PRICING
     assert "pro" in PRICING
-    assert PRICING["flash"]["name"] == "gemini-2.5-flash"
-    assert PRICING["pro"]["name"] == "gemini-2.5-pro"
+    assert "name" in PRICING["flash"]
+    assert "name" in PRICING["pro"]
 
 def test_run_agent_telemetry_calculation(mock_flash_response):
     """Verifies that run_agent calculates tokens, duration, and cost accurately."""
@@ -35,7 +35,7 @@ def test_run_agent_telemetry_calculation(mock_flash_response):
     content, metric = run_agent(mock_llm, "flash", [])
 
     assert content == "Test analysis completed"
-    assert metric["model"] == "gemini-2.5-flash"
+    assert metric["model"] == PRICING["flash"]["name"]
     assert metric["in_tokens"] == 1_000_000
     assert metric["out_tokens"] == 1_000_000
     # in: 0.075, out: 0.30 -> total = 0.375 USD
